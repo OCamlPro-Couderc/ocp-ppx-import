@@ -14,7 +14,10 @@ module Mod2 = MyModule.Mod2
 module Mod3Alias = MyModule.Mod3
 ```
 
+It can be used in combination with [ocp-nsgen](https://github.com/OCamlPro-Couderc/ocp-nsgen) to use external libraries as namespaces. 
+
 ## TODO:
 * Allow to import all modules
+* Allow imports in signature; drawback: every alias generated is exported.
 * Installation
 * More?
