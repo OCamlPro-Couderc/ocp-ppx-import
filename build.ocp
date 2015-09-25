@@ -1,0 +1,12 @@
+
+begin program "ocp-ppx-import"
+    files = [ "import.ml" ]
+    requires = [ "compiler-libs.common" ]
+end
+
+begin program "test"
+    files = [ "oCaml.ml" (comp += [ "-no-alias-deps" ])
+              "test.ml"
+                (comp += [ "-ppx" "_obuild/ocp-ppx-import/ocp-ppx-import.byte" ])]
+    requires = [ "compiler-libs.common" ]
+end
