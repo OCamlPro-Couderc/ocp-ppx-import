@@ -9,12 +9,25 @@ The syntax is simple:
 ```
 This simple piece of code will generate the following code:
 ```ocaml
-module Mod1 = MyModule.Mod1
-module Mod2 = MyModule.Mod2
-module Mod3Alias = MyModule.Mod3
+module *namespace*-MyModule = struct
+  module Mod1 = MyModule.Mod1
+  module Mod2 = MyModule.Mod2
+  module Mod3Alias = MyModule.Mod3
+end
+open *namespace*-MyModule
 ```
 
-It can be used in combination with [ocp-nsgen](https://github.com/OCamlPro-Couderc/ocp-nsgen) to use external libraries as namespaces. 
+Of course, it is not a valid module identifier, which is expected to avoid
+clashes with other modules.
+
+It can be used in combination with
+[ocp-nsgen](https://github.com/OCamlPro-Couderc/ocp-nsgen) to use external
+libraries as namespaces.
+
+The following syntax is also available to import a unique module:
+```ocaml
+[%%import MyModule.M1]
+```
 
 ## Namespace declaration
 
@@ -28,6 +41,9 @@ has been compiled with ```-no-alias-deps```).
 
 ## TODO:
 * Allow to import all modules
-* Allow imports in signature; drawback: every alias generated is exported.
+* Allow imports in signature, which is not that relevant: the generated
+  signature will contain this specific generated module which is
+  unusable. Moreover, types can be prefixed with the correct module.
 * Installation
-* More?
+* A way to import values which is simple, and possibly types and classes (more
+  complicated), and possibly module types.

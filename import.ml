@@ -27,8 +27,10 @@ let print_lid fmt lid =
       Format.fprintf fmt "%a(%a)" step l1 step l2 in
   step fmt lid
 
-
-
+(* let rec lid_length = function *)
+(*     Lident id -> String.length id *)
+(*   | Ldot (lid, s) -> String.length lid + 1 + lid_length lid *)
+(*   | Lapply (l1, l2) -> lid_leng *)
 let parse_module m =
   match m.pexp_desc with
   | Pexp_apply ( { pexp_desc = Pexp_ident {txt = Lident "=>" }},
@@ -36,11 +38,11 @@ let parse_module m =
         "", { pexp_desc = Pexp_construct (m', None)}; ]) ->
     { modname = m; alias = Some m' }
   | Pexp_construct (m', None) -> { modname = m'; alias = None }
-  (* | Ppat_any *)
+  | Pexp_ident { txt = Lident ".." } -> assert false
   | _ -> raise Syntaxerr.(Error (Expecting (m.pexp_loc, "module longident")))
 
 
-let parse_import p =
+let parse_import loc p =
   match p.pexp_desc with
   | Pexp_open (ovf, ns, {pexp_desc = Pexp_tuple mods}) ->
     let modules =
@@ -48,14 +50,33 @@ let parse_import p =
         raise Syntaxerr.(Error (Expecting (p.pexp_loc, "module(s)")))
       else
         List.map parse_module mods in
-    { namespace = ns; modules }
+    if Hashtbl.mem used ns.txt then
+      raise Syntaxerr.(
+          Error (Ill_formed_ast (loc, "namespace already imported")))
+    else
+      { namespace = ns; modules }
+  | Pexp_construct ({ txt = Ldot (ns, md); loc }, None) ->
+    (* let ns_loc = *)
+    (*   { loc with *)
+    (*     loc_end = { loc.Lexing.pos_cnum with *)
+    (*                 pos_cnum = loc.pos_cnum - String.length md - 1 }} in *)
+    (* let md_loc = *)
+    (*   { loc with *)
+    (*     loc_start = { loc.Lexing.pos_cnum with *)
+    (*                   pos_cnum = loc.pos_cnum + lid_length ns + 1 }} in *)
+    if Hashtbl.mem used ns then
+      raise Syntaxerr.(
+          Error (Ill_formed_ast (loc, "namespace already imported")))
+    else
+      { namespace = Location.mkloc ns loc;
+        modules = [{ modname = Location.mkloc (Lident md) loc; alias = None }] }
   | _ ->
     raise Syntaxerr.(Error (Expecting (p.pexp_loc, "module imports")))
 
 let parse_payload loc p =
   match p with
     PStr [{ pstr_desc = Pstr_eval (p, _)}] ->
-    parse_import p
+    parse_import loc p
   | _ ->
     Format.eprintf "Error: %a.\n%!" (Printast.payload 0) p;
     raise Syntaxerr.(Error (Ill_formed_ast (loc, "expecting a module with \
@@ -84,11 +105,11 @@ let gen_binding ns mi =
       | _ ->
         raise Syntaxerr.(
             Error
-              (Ill_formed_ast (mi.modname.loc, "only toplevel modules can \
+              (Variable_in_scope (mi.modname.loc, "only toplevel modules can \
                                                 be imported")))
   in
   let loc = mi.modname.loc in
-  Hashtbl.add used () ns.txt;
+  Hashtbl.add used ns.txt ();
   let imported = concat_lids loc ns.txt mi.modname.txt in
   let modexpr = Mod.ident ~loc (Location.mkloc imported loc) in
   Str.module_ ~loc (Mb.mk ~loc:modloc modident modexpr)
