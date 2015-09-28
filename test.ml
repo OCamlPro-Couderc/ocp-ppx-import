@@ -1,1 +1,8 @@
-[%%import OCaml.(Ast_helper, Ast_mapper, Longident => Lid)]
+[%%import Ns.(M1, M2 => M2')]
+
+let p1 = M1.print
+let p2 = M2'.print
+
+let _ =
+  M1.print ();
+  M2'.print ()

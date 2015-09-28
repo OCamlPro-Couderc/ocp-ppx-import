@@ -10,10 +10,19 @@ type mod_import = {
   alias : Longident.t loc option;
 }
 
-type import = {
+type import_config = {
     namespace : Longident.t loc;
     modules : mod_import list;
 }
+
+let print_lid fmt lid =
+  let rec step fmt = function
+      Lident id -> Format.fprintf fmt "%s" id
+    | Ldot (lid, s) ->
+      Format.fprintf fmt "%a.%s" step lid s
+    | Lapply (l1, l2) ->
+      Format.fprintf fmt "%a(%a)" step l1 step l2 in
+  step fmt lid
 
 
 
@@ -80,6 +89,24 @@ let gen_binding ns mi =
   let modexpr = Mod.ident ~loc (Location.mkloc imported loc) in
   Str.module_ ~loc (Mb.mk ~loc:modloc modident modexpr)
 
+let gen_fake_module loc (conf : import_config) parsed =
+  let items =
+    let mbs =
+      List.map (gen_binding conf.namespace) conf.modules in
+    List.rev_append mbs [] in
+  let md_loc = conf.namespace.loc in
+  let md_name =
+    Format.asprintf "*namespace*-%a" print_lid conf.namespace.txt in
+  let md_lid =
+    Location.mkloc (Lident md_name) md_loc in
+  let mb = Mod.structure ~loc items in
+  let item =
+    Str.module_ (Mb.mk ~loc (Location.mkloc md_name md_loc) mb) in
+  (Str.open_ ~loc @@ Opn.mk ~loc md_lid) :: item :: parsed
+
+
+
+
 let gen_imports argv =
   { default_mapper with
     structure = fun mapper str ->
@@ -88,9 +115,7 @@ let gen_imports argv =
             match strc.pstr_desc with
               Pstr_extension (({ txt = "import"; loc }, payload), attrs) ->
               let imports = parse_payload strc.pstr_loc payload in
-              let mbs =
-                List.map (gen_binding imports.namespace) imports.modules in
-              List.rev_append mbs parsed
+              gen_fake_module loc imports parsed
             | _ -> default_mapper.structure_item mapper strc :: parsed)
           [] str in
       List.rev rev_strc
