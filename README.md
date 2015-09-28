@@ -1,4 +1,4 @@
-# ocp-ppx-import
+# ocp-ppx-namespace
 A ppx to simplify the usage of module aliases wrappers in OCaml
 
 This ppx adds an extension point for structures (not signatures) to import multiple submodules from a given module. It is especially useful when using module aliases to simulate namespaces.

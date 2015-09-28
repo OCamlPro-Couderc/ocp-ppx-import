@@ -97,4 +97,4 @@ let gen_imports argv =
   }
 
 let _ =
-  register "import" gen_imports
+  register "namespace" gen_imports
