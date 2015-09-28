@@ -16,6 +16,16 @@ module Mod3Alias = MyModule.Mod3
 
 It can be used in combination with [ocp-nsgen](https://github.com/OCamlPro-Couderc/ocp-nsgen) to use external libraries as namespaces. 
 
+## Namespace declaration
+
+The namespace declaration is also usable:
+```ocaml
+[%%namespace MyModule]
+```
+which is simply an opening. The idea is using it with ocamldep: it won't
+generate a dependency to MyModule in this specific case (useful when MyModule
+has been compiled with ```-no-alias-deps```).
+
 ## TODO:
 * Allow to import all modules
 * Allow imports in signature; drawback: every alias generated is exported.

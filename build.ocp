@@ -10,7 +10,8 @@ begin library "ns"
 end
 
 begin program "test"
-    files = [ "test.ml"
+    files = [ "tests/myNs.ml" (comp += "-no-alias-deps")
+              "tests/test.ml"
               (comp += [ "-ppx"
                            "_obuild/ocp-ppx-namespace/ocp-ppx-namespace.byte" ])]
     requires = [ "ns" ]

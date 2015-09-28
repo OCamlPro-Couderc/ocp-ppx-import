@@ -15,6 +15,9 @@ type import_config = {
     modules : mod_import list;
 }
 
+let namespace = ref None
+let used = Hashtbl.create 17
+
 let print_lid fmt lid =
   let rec step fmt = function
       Lident id -> Format.fprintf fmt "%s" id
@@ -85,6 +88,7 @@ let gen_binding ns mi =
                                                 be imported")))
   in
   let loc = mi.modname.loc in
+  Hashtbl.add used () ns.txt;
   let imported = concat_lids loc ns.txt mi.modname.txt in
   let modexpr = Mod.ident ~loc (Location.mkloc imported loc) in
   Str.module_ ~loc (Mb.mk ~loc:modloc modident modexpr)
@@ -104,8 +108,17 @@ let gen_fake_module loc (conf : import_config) parsed =
     Str.module_ (Mb.mk ~loc (Location.mkloc md_name md_loc) mb) in
   (Str.open_ ~loc @@ Opn.mk ~loc md_lid) :: item :: parsed
 
+let extract_namespace loc = function
+    PStr [{ pstr_desc =
+              Pstr_eval ({ pexp_desc = Pexp_construct (lid, None) }, _)}] -> lid
+  | _ -> raise Syntaxerr.(
+      Error (Expecting (loc, "module identifier")))
 
-
+let gen_namespace_item ns parsed =
+    if Ast_mapper.tool_name () = "ocamldep" then parsed
+    else
+      let loc = ns.loc in
+      (Str.open_ ~loc @@ Opn.mk ~loc ns) :: parsed
 
 let gen_imports argv =
   { default_mapper with
@@ -116,6 +129,18 @@ let gen_imports argv =
               Pstr_extension (({ txt = "import"; loc }, payload), attrs) ->
               let imports = parse_payload strc.pstr_loc payload in
               gen_fake_module loc imports parsed
+            | Pstr_extension (({txt = "namespace"; loc}, payload), attrs) ->
+              let ns =
+                match !namespace with
+                  Some ns ->
+                  raise Syntaxerr.(
+                      Error (Ill_formed_ast (loc, "namespace already defined")))
+                | None ->
+                  let ns = extract_namespace loc payload in
+                  namespace := Some ns;
+                  ns
+              in
+              gen_namespace_item ns parsed
             | _ -> default_mapper.structure_item mapper strc :: parsed)
           [] str in
       List.rev rev_strc
