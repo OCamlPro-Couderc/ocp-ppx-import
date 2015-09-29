@@ -37,11 +37,13 @@ let print_lid fmt lid =
       Format.fprintf fmt "%a(%a)" step l1 step l2 in
   step fmt lid
 
-(* let rec lid_length = function *)
-(*     Lident id -> String.length id *)
-(*   | Ldot (lid, s) -> String.length lid + 1 + lid_length lid *)
-(*   | Lapply (l1, l2) -> lid_leng *)
-let parse_element kind (acc_vals, acc_mods) elt =
+let parse_kind elt =
+  if List.exists (fun (str, _) -> str.txt = "type") elt.pexp_attributes
+  then Type
+  else Value
+
+let parse_element (acc_vals, acc_mods) elt =
+  let kind = parse_kind elt in
   match elt.pexp_desc with
   | Pexp_apply ( { pexp_desc = Pexp_ident {txt = Lident "=>" }},
       [ "", { pexp_desc = Pexp_construct (m, None)};
@@ -49,11 +51,7 @@ let parse_element kind (acc_vals, acc_mods) elt =
     acc_vals, { mod_kind = kind; mod_name = m; mod_alias = Some m' } :: acc_mods
   | Pexp_construct (m', None) ->
     acc_vals, { mod_kind = kind; mod_name = m'; mod_alias = None } :: acc_mods
-(*   | Pexp_ident { txt = Lident ".." } -> assert false *)
-(*   | _ -> raise Syntaxerr.(Error (Expecting (m.pexp_loc, "module longident"))) *)
 
-(* let parse_value kind v = *)
-(*   match v.pexp_desc with *)
   | Pexp_apply ( { pexp_desc = Pexp_ident {txt = Lident "=>" }},
       [ "", { pexp_desc = Pexp_ident {txt = Lident v; loc}};
         "", { pexp_desc = (Pexp_ident {txt = Lident v'; loc = loc'})}; ]) ->
@@ -69,7 +67,6 @@ let parse_element kind (acc_vals, acc_mods) elt =
 
 
 let parse_import loc p =
-  let kind = Value in
   match p.pexp_desc with
   | Pexp_open (ovf, ns, {pexp_desc = Pexp_tuple elts}) ->
     let values, modules =
@@ -77,7 +74,7 @@ let parse_import loc p =
         raise Syntaxerr.(
             Error (Expecting (p.pexp_loc, "module(s) and/or value(s)")))
       else
-          List.fold_left (parse_element Value) ([], []) elts in
+          List.fold_left parse_element ([], []) elts in
     if Hashtbl.mem used ns.txt then
       raise Syntaxerr.(
           Error (Ill_formed_ast (loc, "namespace already imported")))
@@ -90,7 +87,7 @@ let parse_import loc p =
     else
       { namespace = Location.mkloc ns loc;
         modules = [{
-            mod_kind = kind;
+            mod_kind = parse_kind p;
             mod_name = Location.mkloc (Lident md) loc;
             mod_alias = None
           }];
@@ -102,7 +99,7 @@ let parse_import loc p =
     else
       { namespace = Location.mkloc ns loc;
         values = [{
-            val_kind = kind;
+            val_kind = parse_kind p;
             val_name = Location.mkloc md loc;
             val_alias = None
           }];
@@ -148,8 +145,13 @@ let gen_mod_binding ns mi =
   let loc = mi.mod_name.loc in
   Hashtbl.add used ns.txt ();
   let imported = concat_lids loc ns.txt mi.mod_name.txt in
-  let modexpr = Mod.ident ~loc (Location.mkloc imported loc) in
-  Str.module_ ~loc (Mb.mk ~loc:modloc modident modexpr)
+  match mi.mod_kind with
+    Value ->
+    let modexpr = Mod.ident ~loc (Location.mkloc imported loc) in
+    Str.module_ ~loc (Mb.mk ~loc:modloc modident modexpr)
+  | Type ->
+    let modtype_expr = Mty.ident ~loc (Location.mkloc imported loc) in
+    Str.modtype ~loc (Mtd.mk ~loc:modloc modident ~typ:modtype_expr)
 
 let gen_val_binding ns vi =
   let valident, valloc =
