@@ -4,6 +4,7 @@ open Ast_helper
 open Asttypes
 open Parsetree
 open Longident
+open Types
 
 type kind = Value | Type
 
@@ -27,6 +28,90 @@ type import_config = {
 
 let namespace = ref None
 let used = Hashtbl.create 17
+
+let rec lid_of_path = function
+    Path.Pident id -> Lident (Ident.name id)
+  | Path.Pdot (p, str, _) -> Ldot (lid_of_path p, str)
+  | Path.Papply (p1, p2) -> Lapply (lid_of_path p1, lid_of_path p2)
+
+let find_cmi ns =
+  let ns_name = match ns.txt with Lident n -> n | _ -> assert false in
+  let path = Misc.find_in_path_uncap !(Config.load_path) (ns_name ^ ".cmi") in
+  let cmi = Cmi_format.read_cmi path in
+  cmi.Cmi_format.cmi_sign
+
+let find_type_decl loc sg name =
+  let rec find rem =
+    match rem with
+      [] -> raise Syntaxerr.(
+        Error (Ill_formed_ast (loc, Format.sprintf "Unbound type %s" name)))
+    | Sig_type (id, td, rs) :: _ when Ident.name id = name -> td
+    | _ :: rem -> find rem in
+  find sg
+
+let rec gen_core_type loc ty =
+  match (Btype.repr ty).desc with
+    Tvar (Some v) | Tunivar (Some v) -> Typ.var v
+  | Tvar None | Tunivar None -> Typ.var "_"
+  | Tarrow (l, ty, ty', _) ->
+    Typ.arrow l (gen_core_type loc ty) (gen_core_type loc ty')
+  | Ttuple tys -> Typ.tuple @@ List.map (gen_core_type loc) tys
+  | Tconstr (p, tys, _) ->
+    Typ.constr (Location.mkloc (lid_of_path p) loc) @@
+    List.map (gen_core_type loc) tys
+  | Tobject (_, _) | Tfield (_, _, _, _) | Tvariant _ | Tpackage(_, _, _) ->
+    failwith "Not implemented"
+  | Tnil | Tlink _ | Tsubst _ -> assert false
+  | Tpoly (ty, params) ->
+    failwith "Not implemented"
+
+let gen_constructor loc cd =
+  let args = List.map (gen_core_type loc) cd.cd_args in
+  let res = match cd.cd_res with
+      None -> None
+    | Some ty -> Some (gen_core_type loc ty) in
+  let name = Location.mkloc (Ident.name cd.cd_id) loc in
+  Type.constructor ~args ?res name
+
+let gen_field loc ld =
+  let mut = ld.ld_mutable in
+  let name = Location.mkloc (Ident.name ld.ld_id) loc in
+  Type.field ~mut name (gen_core_type loc ld.ld_type)
+
+let gen_type_kind loc = function
+    Type_abstract -> Ptype_abstract
+  | Type_open -> Ptype_open
+  | Type_record (lds, _) ->
+    Ptype_record (List.map (gen_field loc) lds)
+  | Type_variant cds ->
+    Ptype_variant (List.map (gen_constructor loc) cds)
+
+let gen_type_params loc params =
+  let i = ref 0 in
+  let gen_param p =
+    match p.desc with
+      Tvar _ ->
+      (gen_core_type loc p, Invariant), None
+    | _ ->
+      let param =
+        Typ.var ("a" ^ (string_of_int !i)) in
+      incr i;
+      (param, Invariant), Some (param, gen_core_type loc p, loc) in
+  let params, cstrs =
+    List.map gen_param params |> List.split in
+  let cstrs =
+    List.fold_left (fun l opt ->
+         match opt with
+           Some cstr -> cstr :: l
+         | None -> l) [] cstrs
+    |> List.rev in
+  params, cstrs
+
+let gen_typedecl_from_sig loc ty_name orig_name decl =
+  let kind = gen_type_kind loc decl.type_kind in
+  let params, cstrs = gen_type_params loc decl.type_params in
+  let manifest = Typ.constr orig_name (fst @@ List.split params) in
+  Type.mk ~kind ~params ~cstrs ~manifest ty_name
 
 let print_lid fmt lid =
   let rec step fmt = function
@@ -64,7 +149,6 @@ let parse_element (acc_vals, acc_mods) elt =
       val_alias = None } :: acc_vals, acc_mods
   | _ -> raise Syntaxerr.(
       Error (Expecting (elt.pexp_loc, "value or module identifier")))
-
 
 let parse_import loc p =
   match p.pexp_desc with
@@ -166,13 +250,30 @@ let gen_val_binding ns vi =
   let pat = Pat.var valident in
   Str.value Nonrecursive ~loc [Vb.mk ~loc:valloc pat expr]
 
+let gen_typedecl ns vi =
+  let tyident, tyloc =
+    match vi.val_alias with
+      Some v -> v, v.loc
+    | None -> vi.val_name, vi.val_name.loc
+  in
+  let loc = vi.val_name.loc in
+  Hashtbl.add used ns.txt ();
+  let imported = concat_lids loc ns.txt (Lident vi.val_name.txt) in
+  let sg = find_cmi ns in
+  let td_sig = find_type_decl loc sg vi.val_name.txt in
+  let td =
+    gen_typedecl_from_sig loc tyident (Location.mkloc imported loc) td_sig in
+  Str.type_ ~loc [td]
 
 let gen_fake_module loc (conf : import_config) parsed =
   let items =
     let mbs =
       List.map (gen_mod_binding conf.namespace) conf.modules in
     let vbs =
-      List.map (gen_val_binding conf.namespace) conf.values in
+      List.map (fun vi ->
+          match vi.val_kind with
+            Value -> gen_val_binding conf.namespace vi
+          | Type -> gen_typedecl conf.namespace vi) conf.values in
     List.rev_append mbs [] |> List.rev_append vbs in
   let md_loc = conf.namespace.loc in
   let md_name =
