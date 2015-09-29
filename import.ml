@@ -5,14 +5,24 @@ open Asttypes
 open Parsetree
 open Longident
 
+type kind = Value | Type
+
 type mod_import = {
-  modname : Longident.t loc;
-  alias : Longident.t loc option;
+  mod_kind : kind;
+  mod_name : Longident.t loc;
+  mod_alias : Longident.t loc option;
+}
+
+type val_import = {
+  val_kind : kind;
+  val_name : string loc;
+  val_alias : string loc option;
 }
 
 type import_config = {
     namespace : Longident.t loc;
     modules : mod_import list;
+    values : val_import list;
 }
 
 let namespace = ref None
@@ -31,45 +41,72 @@ let print_lid fmt lid =
 (*     Lident id -> String.length id *)
 (*   | Ldot (lid, s) -> String.length lid + 1 + lid_length lid *)
 (*   | Lapply (l1, l2) -> lid_leng *)
-let parse_module m =
-  match m.pexp_desc with
+let parse_element kind (acc_vals, acc_mods) elt =
+  match elt.pexp_desc with
   | Pexp_apply ( { pexp_desc = Pexp_ident {txt = Lident "=>" }},
       [ "", { pexp_desc = Pexp_construct (m, None)};
         "", { pexp_desc = Pexp_construct (m', None)}; ]) ->
-    { modname = m; alias = Some m' }
-  | Pexp_construct (m', None) -> { modname = m'; alias = None }
-  | Pexp_ident { txt = Lident ".." } -> assert false
-  | _ -> raise Syntaxerr.(Error (Expecting (m.pexp_loc, "module longident")))
+    acc_vals, { mod_kind = kind; mod_name = m; mod_alias = Some m' } :: acc_mods
+  | Pexp_construct (m', None) ->
+    acc_vals, { mod_kind = kind; mod_name = m'; mod_alias = None } :: acc_mods
+(*   | Pexp_ident { txt = Lident ".." } -> assert false *)
+(*   | _ -> raise Syntaxerr.(Error (Expecting (m.pexp_loc, "module longident"))) *)
+
+(* let parse_value kind v = *)
+(*   match v.pexp_desc with *)
+  | Pexp_apply ( { pexp_desc = Pexp_ident {txt = Lident "=>" }},
+      [ "", { pexp_desc = Pexp_ident {txt = Lident v; loc}};
+        "", { pexp_desc = (Pexp_ident {txt = Lident v'; loc = loc'})}; ]) ->
+    { val_kind = kind;
+      val_name = Location.mkloc v loc;
+      val_alias = Some (Location.mkloc v' loc') } :: acc_vals, acc_mods
+  | Pexp_ident { txt = Lident v; loc } ->
+    { val_kind = kind;
+      val_name = Location.mkloc v loc;
+      val_alias = None } :: acc_vals, acc_mods
+  | _ -> raise Syntaxerr.(
+      Error (Expecting (elt.pexp_loc, "value or module identifier")))
 
 
 let parse_import loc p =
+  let kind = Value in
   match p.pexp_desc with
-  | Pexp_open (ovf, ns, {pexp_desc = Pexp_tuple mods}) ->
-    let modules =
-      if mods = [] then
-        raise Syntaxerr.(Error (Expecting (p.pexp_loc, "module(s)")))
+  | Pexp_open (ovf, ns, {pexp_desc = Pexp_tuple elts}) ->
+    let values, modules =
+      if elts = [] then
+        raise Syntaxerr.(
+            Error (Expecting (p.pexp_loc, "module(s) and/or value(s)")))
       else
-        List.map parse_module mods in
+          List.fold_left (parse_element Value) ([], []) elts in
     if Hashtbl.mem used ns.txt then
       raise Syntaxerr.(
           Error (Ill_formed_ast (loc, "namespace already imported")))
     else
-      { namespace = ns; modules }
+      { namespace = ns; modules; values }
   | Pexp_construct ({ txt = Ldot (ns, md); loc }, None) ->
-    (* let ns_loc = *)
-    (*   { loc with *)
-    (*     loc_end = { loc.Lexing.pos_cnum with *)
-    (*                 pos_cnum = loc.pos_cnum - String.length md - 1 }} in *)
-    (* let md_loc = *)
-    (*   { loc with *)
-    (*     loc_start = { loc.Lexing.pos_cnum with *)
-    (*                   pos_cnum = loc.pos_cnum + lid_length ns + 1 }} in *)
     if Hashtbl.mem used ns then
       raise Syntaxerr.(
           Error (Ill_formed_ast (loc, "namespace already imported")))
     else
       { namespace = Location.mkloc ns loc;
-        modules = [{ modname = Location.mkloc (Lident md) loc; alias = None }] }
+        modules = [{
+            mod_kind = kind;
+            mod_name = Location.mkloc (Lident md) loc;
+            mod_alias = None
+          }];
+        values = [] }
+  | Pexp_ident { txt = Ldot (ns, md); loc } ->
+    if Hashtbl.mem used ns then
+      raise Syntaxerr.(
+          Error (Ill_formed_ast (loc, "namespace already imported")))
+    else
+      { namespace = Location.mkloc ns loc;
+        values = [{
+            val_kind = kind;
+            val_name = Location.mkloc md loc;
+            val_alias = None
+          }];
+        modules = [] }
   | _ ->
     raise Syntaxerr.(Error (Expecting (p.pexp_loc, "module imports")))
 
@@ -93,32 +130,48 @@ let concat_lids loc ns md =
   in
   concat md
 
-let gen_binding ns mi =
+let gen_mod_binding ns mi =
   let modident, modloc =
-    match mi.alias with
+    match mi.mod_alias with
       Some { txt = Lident modname; loc } ->
       Location.mkloc modname loc, loc
     | Some _ -> assert false
     | None ->
-      match mi.modname with
+      match mi.mod_name with
         { txt = Lident modname; loc } -> Location.mkloc modname loc, loc
       | _ ->
         raise Syntaxerr.(
             Error
-              (Variable_in_scope (mi.modname.loc, "only toplevel modules can \
-                                                be imported")))
+              (Variable_in_scope (mi.mod_name.loc,
+                                  "only toplevel modules can be imported")))
   in
-  let loc = mi.modname.loc in
+  let loc = mi.mod_name.loc in
   Hashtbl.add used ns.txt ();
-  let imported = concat_lids loc ns.txt mi.modname.txt in
+  let imported = concat_lids loc ns.txt mi.mod_name.txt in
   let modexpr = Mod.ident ~loc (Location.mkloc imported loc) in
   Str.module_ ~loc (Mb.mk ~loc:modloc modident modexpr)
+
+let gen_val_binding ns vi =
+  let valident, valloc =
+    match vi.val_alias with
+      Some v -> v, v.loc
+    | None -> vi.val_name, vi.val_name.loc
+  in
+  let loc = vi.val_name.loc in
+  Hashtbl.add used ns.txt ();
+  let imported = concat_lids loc ns.txt (Lident vi.val_name.txt) in
+  let expr = Exp.ident ~loc (Location.mkloc imported loc) in
+  let pat = Pat.var valident in
+  Str.value Nonrecursive ~loc [Vb.mk ~loc:valloc pat expr]
+
 
 let gen_fake_module loc (conf : import_config) parsed =
   let items =
     let mbs =
-      List.map (gen_binding conf.namespace) conf.modules in
-    List.rev_append mbs [] in
+      List.map (gen_mod_binding conf.namespace) conf.modules in
+    let vbs =
+      List.map (gen_val_binding conf.namespace) conf.values in
+    List.rev_append mbs [] |> List.rev_append vbs in
   let md_loc = conf.namespace.loc in
   let md_name =
     Format.asprintf "*namespace*-%a" print_lid conf.namespace.txt in

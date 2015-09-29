@@ -29,6 +29,44 @@ The following syntax is also available to import a unique module:
 [%%import MyModule.M1]
 ```
 
+## Value import
+
+Values can also be imported from a module:
+```ocaml
+[%%import MyModule.(my_function, my_value => v)]
+```
+
+Of courses, modules and values can be imported in the same import directive.
+
+## Types and module types import
+
+Not implemented yet.
+
+Idea: using the exact same syntax, adding the attribute ```[@type]``` on each
+imported element (or globally) results in importing a type with the qualified
+name instead of a value (and reciprocally with moduel types instead of module).
+
+However, it will need to read the signature of the module to generate the
+correct manifest and kind for type declarations, i.e.:
+```ocaml
+[%%import Pervasives.(option [@type])]
+```
+must be translated as:
+```
+module *namespace*-Pervasives = struct
+  type 'a option = 'a Pervasives.option = Some 'a | None
+end
+open *namespace*-Pervasives 
+```
+
+Otherwise, if it simply abbreviated (without writing the complete definition),
+the constructors Some and None won't be in the scope of the current module.
+[ppx_import](https://github.com/whitequark/ppx_import) does the job actually.
+
+## Classes and class types
+
+Not supported yet.
+
 ## Namespace declaration
 
 The namespace declaration is also usable:
