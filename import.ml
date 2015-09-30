@@ -28,26 +28,34 @@ type import_config = {
 
 let namespace = ref None
 let used = Hashtbl.create 17
+(* let imported_pers = Hashtbl.create 17 *)
 
 let rec lid_of_path = function
     Path.Pident id -> Lident (Ident.name id)
   | Path.Pdot (p, str, _) -> Ldot (lid_of_path p, str)
   | Path.Papply (p1, p2) -> Lapply (lid_of_path p1, lid_of_path p2)
 
-let find_cmi ns =
-  let ns_name = match ns.txt with Lident n -> n | _ -> assert false in
+let find_cmi loc ns =
+  let ns_name = match ns.txt with
+      Lident n -> n
+    | _ -> raise Syntaxerr.(
+        Error (Expecting (loc, "only compilation units can be imported"))) in
   let path = Misc.find_in_path_uncap !(Config.load_path) (ns_name ^ ".cmi") in
   let cmi = Cmi_format.read_cmi path in
   cmi.Cmi_format.cmi_sign
 
-let find_type_decl loc sg name =
-  let rec find rem =
-    match rem with
-      [] -> raise Syntaxerr.(
-        Error (Ill_formed_ast (loc, Format.sprintf "Unbound type %s" name)))
-    | Sig_type (id, td, rs) :: _ when Ident.name id = name -> td
-    | _ :: rem -> find rem in
-  find sg
+let find_type_decl loc ns sg tname =
+  (* Trick: adding the signature into an empty environment and extract the type
+     from it will result in a typedecl with every type constructor correclty
+     prefixed by the module name.
+     It avoid doing the strengthening by hand. *)
+  let ns = match ns with
+    Lident s -> s | _ -> assert false in
+  let nsid = Ident.create_persistent ns in
+  let tmp_env =
+    Env.add_module nsid (Mty_signature sg) @@ Compmisc.initial_env () in
+  let td = Env.find_type (Path.(Pdot(Pident nsid, tname, 0))) tmp_env in
+  td
 
 let rec gen_core_type loc ty =
   match (Btype.repr ty).desc with
@@ -310,8 +318,8 @@ let gen_typedecl ns vi =
   let loc = vi.val_name.loc in
   Hashtbl.add used ns.txt ();
   let imported = concat_lids loc ns.txt (Lident vi.val_name.txt) in
-  let sg = find_cmi ns in
-  let td_sig = find_type_decl loc sg vi.val_name.txt in
+  let sg = find_cmi loc ns in
+  let td_sig = find_type_decl loc ns.txt sg vi.val_name.txt in
   let td =
     gen_typedecl_from_sig loc tyident (Location.mkloc imported loc) td_sig in
   Str.type_ ~loc [td]
