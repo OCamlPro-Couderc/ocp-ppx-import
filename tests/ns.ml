@@ -7,3 +7,10 @@ type t = int
 type 'a u = 'a list
 
 type 'a opt = Som of 'a | Non
+
+type record = {
+  p : 'a. 'a -> 'a;
+  o : < m : int -> int >;
+  v : [ `A | `B of int ];
+  c : int opt;
+}

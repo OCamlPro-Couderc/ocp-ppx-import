@@ -59,11 +59,62 @@ let rec gen_core_type loc ty =
   | Tconstr (p, tys, _) ->
     Typ.constr (Location.mkloc (lid_of_path p) loc) @@
     List.map (gen_core_type loc) tys
-  | Tobject (_, _) | Tfield (_, _, _, _) | Tvariant _ | Tpackage(_, _, _) ->
-    failwith "Not implemented"
-  | Tnil | Tlink _ | Tsubst _ -> assert false
+  | Tobject (ty, _) -> gen_object loc ty
+  | Tvariant rd ->
+    gen_variant loc rd
+  | Tpackage(p, lids, tys) ->
+    gen_package loc (p, lids, tys)
   | Tpoly (ty, params) ->
-    failwith "Not implemented"
+    gen_poly loc params ty
+  | Tnil | Tlink _ | Tsubst _ | Tfield (_, _, _, _) -> assert false
+
+and gen_poly loc params ty =
+  let gen_param ty =
+    match (Btype.repr ty).desc with
+      Tunivar (Some v) -> v
+    | _ -> assert false in
+  gen_core_type loc ty |>
+  Typ.poly (List.map gen_param params)
+
+and gen_object loc ty =
+  let rec step acc ty =
+    match (Btype.repr ty).desc with
+      Tfield (l, (Fpresent | Fvar { contents = Some Fpresent }), ty, rem) ->
+      let ty = gen_core_type loc ty in
+      step ((l, [], ty) :: acc) rem
+    | Tfield (_, _, _, rem) -> step acc rem
+    | Tvar _ | Tunivar _ -> Typ.object_ (List.rev acc) Open
+    | Tnil -> Typ.object_ (List.rev acc) Closed
+    | _ -> assert false
+  in
+  step [] ty
+
+and gen_variant loc rd =
+  let closed = if rd.row_closed then Closed else Open in
+  let is_closed = rd.row_closed in
+  let gen_fields (labels, present) (l, rf) =
+    match rf with
+      Rpresent None ->
+      let present = if is_closed then l :: present else present in
+      Rtag (l, [], true, []) :: labels, present
+    | Rpresent (Some ty) ->
+      let present = if is_closed then l :: present else present in
+      Rtag (l, [], false, [gen_core_type loc ty]) :: labels, present
+    | Reither (cst, tys, _, _) ->
+      Rtag (l, [], cst, List.map (gen_core_type loc) tys) :: labels, present
+    | Rabsent -> labels, present
+  in
+  let labels, present = List.fold_left gen_fields ([], []) rd.row_fields in
+  let present =
+    if List.length labels = List.length present then Some (List.rev present)
+    else None in
+  Typ.variant (List.rev labels) closed present
+
+and gen_package loc (p, lids, tys) =
+  let lid p = Location.mkloc (lid_of_path p) loc in
+  let substs = List.map2 (fun l ty ->
+      Location.mkloc l loc, gen_core_type loc ty) lids tys in
+  Typ.package (lid p) substs
 
 let gen_constructor loc cd =
   let args = List.map (gen_core_type loc) cd.cd_args in
