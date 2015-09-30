@@ -191,15 +191,19 @@ let parse_element (acc_vals, acc_mods) elt =
   match elt.pexp_desc with
   | Pexp_apply ( { pexp_desc = Pexp_ident {txt = Lident "=>" }},
       [ "", { pexp_desc = Pexp_construct (m, None)};
-        "", { pexp_desc = Pexp_construct (m', None)}; ]) ->
-    acc_vals, { mod_kind = kind; mod_name = m; mod_alias = Some m' } :: acc_mods
+        "", ({ pexp_desc = Pexp_construct (m', None)} as e);
+      ]) ->
+    acc_vals, { mod_kind = parse_kind e;
+                mod_name = m;
+                mod_alias = Some m' } :: acc_mods
   | Pexp_construct (m', None) ->
     acc_vals, { mod_kind = kind; mod_name = m'; mod_alias = None } :: acc_mods
 
   | Pexp_apply ( { pexp_desc = Pexp_ident {txt = Lident "=>" }},
       [ "", { pexp_desc = Pexp_ident {txt = Lident v; loc}};
-        "", { pexp_desc = (Pexp_ident {txt = Lident v'; loc = loc'})}; ]) ->
-    { val_kind = kind;
+        "", ({ pexp_desc = (Pexp_ident {txt = Lident v'; loc = loc'})} as e);
+      ]) ->
+    { val_kind = parse_kind e;
       val_name = Location.mkloc v loc;
       val_alias = Some (Location.mkloc v' loc') } :: acc_vals, acc_mods
   | Pexp_ident { txt = Lident v; loc } ->

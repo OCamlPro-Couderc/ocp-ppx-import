@@ -14,3 +14,8 @@ type record = {
   v : [ `A | `B of int ];
   c : int opt;
 }
+
+type 'a v = 'a constraint 'a = int
+
+type r = A of r' | B
+and r' = C of r | D
