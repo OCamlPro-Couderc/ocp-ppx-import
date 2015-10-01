@@ -8,6 +8,7 @@
               r => r' [@type],
               r' => r [@type]
              )]
+(* [%%import Ns.(t [@type], u [@type])] *)
 [%%import Map.(Make, S[@type])]
 
 let p1 = M1.print

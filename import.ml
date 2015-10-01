@@ -339,8 +339,19 @@ let gen_fake_module loc (conf : import_config) parsed =
           | Type -> gen_typedecl conf.namespace vi) conf.values in
     List.rev_append mbs [] |> List.rev_append vbs in
   let md_loc = conf.namespace.loc in
+  let curr_mod_name =
+    let unit_name =
+      md_loc.Location.loc_start.Lexing.pos_fname |>
+      Filename.basename |>
+      Filename.chop_extension |>
+      String.capitalize in
+    match Clflags.for_package with
+      { contents = Some p } ->
+      Format.sprintf "%s.%s" p unit_name
+    | _ -> unit_name in
   let md_name =
-    Format.asprintf "*namespace*-%a" print_lid conf.namespace.txt in
+    Format.asprintf "*namespace*-%a-%s"
+      print_lid conf.namespace.txt curr_mod_name in
   let md_lid =
     Location.mkloc (Lident md_name) md_loc in
   let mb = Mod.structure ~loc items in
