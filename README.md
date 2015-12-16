@@ -77,8 +77,8 @@ open Namespace-Pervasives-Myfile-1
 ```
 
 Otherwise, if it simply abbreviated (without writing the complete definition),
-the constructors Some and None won't be in the scope of the current module.
-[ppx_import](https://github.com/whitequark/ppx_import) does the job actually.
+the constructors Some and None won't be in the scope of the current module. The
+`cmi` files are necessary.
 
 ## Type extensions and exceptions
 
