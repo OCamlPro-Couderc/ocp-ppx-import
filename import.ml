@@ -7,6 +7,9 @@ open Longident
 open Types
 
 type kind = Value | Type
+type result = Open | Include
+
+let stamp = ref 0
 
 type mod_import = {
   mod_kind : kind;
@@ -227,7 +230,10 @@ let parse_import loc p =
           Error (Ill_formed_ast (loc, "namespace already imported")))
     else
       { namespace = ns; modules; values }
-  | Pexp_construct ({ txt = Ldot (ns, md); loc }, None) ->
+  | Pexp_construct ({ txt = Ldot (ns, md); loc }, None)
+  | Pexp_open (_, { txt = ns },
+               { pexp_desc =
+                  Pexp_construct ({ txt = Lident md; loc }, None)}) ->
     if Hashtbl.mem used ns then
       raise Syntaxerr.(
           Error (Ill_formed_ast (loc, "namespace already imported")))
@@ -239,7 +245,9 @@ let parse_import loc p =
             mod_alias = None
           }];
         values = [] }
-  | Pexp_ident { txt = Ldot (ns, md); loc } ->
+  | Pexp_ident { txt = Ldot (ns, md); loc }
+  | Pexp_open (_, { txt = ns },
+               { pexp_desc = Pexp_ident { txt = Lident md; loc } }) ->
     if Hashtbl.mem used ns then
       raise Syntaxerr.(
           Error (Ill_formed_ast (loc, "namespace already imported")))
@@ -328,36 +336,46 @@ let gen_typedecl ns vi =
     gen_typedecl_from_sig loc tyident (Location.mkloc imported loc) td_sig in
   Str.type_ ~loc [td]
 
-let gen_fake_module loc (conf : import_config) parsed =
-  let items =
-    let mbs =
-      List.map (gen_mod_binding conf.namespace) conf.modules in
-    let vbs =
-      List.map (fun vi ->
-          match vi.val_kind with
-            Value -> gen_val_binding conf.namespace vi
-          | Type -> gen_typedecl conf.namespace vi) conf.values in
-    List.rev_append mbs [] |> List.rev_append vbs in
-  let md_loc = conf.namespace.loc in
-  let curr_mod_name =
-    let unit_name =
-      md_loc.Location.loc_start.Lexing.pos_fname |>
-      Filename.basename |>
-      Filename.chop_extension |>
-      String.capitalize in
-    match Clflags.for_package with
-      { contents = Some p } ->
-      Format.sprintf "%s.%s" p unit_name
-    | _ -> unit_name in
-  let md_name =
-    Format.asprintf "*namespace*-%a-%s"
-      print_lid conf.namespace.txt curr_mod_name in
-  let md_lid =
-    Location.mkloc (Lident md_name) md_loc in
-  let mb = Mod.structure ~loc items in
-  let item =
-    Str.module_ (Mb.mk ~loc (Location.mkloc md_name md_loc) mb) in
-  (Str.open_ ~loc @@ Opn.mk ~loc md_lid) :: item :: parsed
+let gen_fake_module =
+  let stamp = ref 0 in
+  fun result loc (conf : import_config) parsed ->
+    incr stamp;
+    let items =
+      let mbs =
+        List.map (gen_mod_binding conf.namespace) conf.modules in
+      let vbs =
+        List.map (fun vi ->
+            match vi.val_kind with
+              Value -> gen_val_binding conf.namespace vi
+            | Type -> gen_typedecl conf.namespace vi) conf.values in
+      List.rev_append mbs [] |> List.rev_append vbs in
+    let md_loc = conf.namespace.loc in
+    let curr_mod_name =
+      let unit_name =
+        try
+          md_loc.Location.loc_start.Lexing.pos_fname |>
+          Filename.basename |>
+          Filename.chop_extension |>
+          String.capitalize
+        with _ -> "//toplevel//"
+      in
+      match Clflags.for_package with
+        { contents = Some p } ->
+        Format.sprintf "%s.%s" p unit_name
+      | _ -> unit_name in
+    let md_name =
+      Format.asprintf "Namespace-%s-%a-%d"
+        curr_mod_name print_lid conf.namespace.txt !stamp in
+    let md_lid =
+      Location.mkloc (Lident md_name) md_loc in
+    let mb = Mod.structure ~loc items in
+    let item =
+      Str.module_ (Mb.mk ~loc (Location.mkloc md_name md_loc) mb) in
+    match result with
+      Open ->
+      (Str.open_ ~loc @@ Opn.mk ~loc md_lid) :: item :: parsed
+    | Include ->
+      (Str.include_ ~loc @@ Incl.mk ~loc @@ Mod.ident ~loc md_lid) :: item :: parsed
 
 let extract_namespace loc = function
     PStr [{ pstr_desc =
@@ -379,7 +397,10 @@ let gen_imports argv =
             match strc.pstr_desc with
               Pstr_extension (({ txt = "import"; loc }, payload), attrs) ->
               let imports = parse_payload strc.pstr_loc payload in
-              gen_fake_module loc imports parsed
+              gen_fake_module Open loc imports parsed
+            | Pstr_extension (({ txt = "include"; loc }, payload), attrs) ->
+              let imports = parse_payload strc.pstr_loc payload in
+              gen_fake_module Include loc imports parsed
             | Pstr_extension (({txt = "namespace"; loc}, payload), attrs) ->
               let ns =
                 match !namespace with

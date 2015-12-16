@@ -19,3 +19,5 @@ type 'a v = 'a constraint 'a = int
 
 type r = A of r' | B
 and r' = C of r | D
+
+module type S = sig type t end

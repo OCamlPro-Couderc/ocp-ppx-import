@@ -13,6 +13,8 @@ begin program "test"
     files = [ "tests/myNs.ml" (comp += "-no-alias-deps")
               "tests/test.ml"
               (comp += [ "-ppx"
-                           "_obuild/ocp-ppx-namespace/ocp-ppx-namespace.byte" ])]
+                           "%{ocp-ppx-namespace_FULL_DST_DIR}%/ocp-ppx-namespace.byte"
+                           "-dsource"
+                       ])]
     requires = [ "ns" ]
 end
